@@ -1,3 +1,0 @@
-int64 temperature
-bool are_motor_ready
-string debug_message
