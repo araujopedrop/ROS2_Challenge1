@@ -108,8 +108,6 @@ public:
                 
                 alive_turtles_vector_.push_back(new_turtle);
                 
-
-                // Publish actualized vector
             }
             else
             {
