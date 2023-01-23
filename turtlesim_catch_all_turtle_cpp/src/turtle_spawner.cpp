@@ -18,6 +18,14 @@
 
     Handle a service server to “catch” a turtle, which means to call the /kill service and remove the turtle from the array of alive turtles.
 
+    Parameters:
+
+    spawn_frequency
+
+    turtle_name_prefix
+
+    use_sim_time
+
 */
 
 class turtleSpawnerNode : public rclcpp::Node
@@ -26,7 +34,15 @@ public:
     turtleSpawnerNode() : Node("turtle_spawner")
     {
 
-        timer_ = this->create_wall_timer(std::chrono::seconds(10), std::bind(&turtleSpawnerNode::spawn_new_turtle, this));
+        this->declare_parameter("spawn_frequency",1.0);
+        this->declare_parameter("turtle_name_prefix","turtle");
+
+        spawn_frequency_ = this->get_parameter("spawn_frequency").as_double();
+        prefix_turtle_ = this->get_parameter("turtle_name_prefix").as_string();
+
+        //RCLCPP_INFO(this->get_logger(), "%d",(int)(1000.0 / spawn_frequency_));
+
+        timer_ = this->create_wall_timer(std::chrono::milliseconds((int)(1000.0 / spawn_frequency_)), std::bind(&turtleSpawnerNode::spawn_new_turtle, this));
         timer_publisher_ = this-> create_wall_timer(std::chrono::seconds(1),std::bind(&turtleSpawnerNode::publish_alive_turtles,this));
         server_ = this->create_service<my_robot_interfaces::srv::KillTurtle>("/catch_turtle", std::bind(&turtleSpawnerNode::callback_service_killer,
                                                                                                         this,
@@ -38,6 +54,8 @@ public:
         // Create publisher. Publish in topic /alive_turtles
         //  publish a Turtle() array.
         publisher_alive_turtles_ = this->create_publisher<my_robot_interfaces::msg::Turtles>("/alive_turtles",10);
+
+        
 
         RCLCPP_INFO(this->get_logger(), "turtle_spawner is up!");
     }
@@ -77,7 +95,7 @@ public:
 
         request->x = posX;
         request->y = posY;
-        request->name = prefix_turtle + std::to_string(counter_turtle);
+        request->name = prefix_turtle_ + std::to_string(counter_turtle);
         counter_turtle++;
 
         auto future = client->async_send_request(request);
@@ -108,6 +126,7 @@ public:
                 
                 alive_turtles_vector_.push_back(new_turtle);
                 
+
             }
             else
             {
@@ -196,7 +215,11 @@ public:
 
 private:
     int counter_turtle = 2;
-    std::string prefix_turtle = "turtle";
+
+
+    double spawn_frequency_; 
+    std::string prefix_turtle_ = "turtle";
+    
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr timer_publisher_;
     std::vector<std::shared_ptr<std::thread>> spawn_turtle_threads_;
