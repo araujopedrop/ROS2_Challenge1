@@ -218,7 +218,7 @@ class turtleControllerNode(Node):
         if self.eTheta > pi:
             self.eTheta -= 2*pi
         elif self.eTheta < -pi:
-            self.target_ang += 2*pi
+            self.eTheta += 2*pi
         
         
         
