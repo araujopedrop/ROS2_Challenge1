@@ -7,6 +7,7 @@
 #include "my_robot_interfaces/msg/turtles.hpp"
 #include <ctime>
 
+
 /*
 
     Functionality:
@@ -40,7 +41,8 @@ public:
         spawn_frequency_ = this->get_parameter("spawn_frequency").as_double();
         prefix_turtle_ = this->get_parameter("turtle_name_prefix").as_string();
 
-        //RCLCPP_INFO(this->get_logger(), "%d",(int)(1000.0 / spawn_frequency_));
+
+        publisher_alive_turtles_ = this->create_publisher<my_robot_interfaces::msg::Turtles>("/alive_turtles",10);
 
         timer_ = this->create_wall_timer(std::chrono::milliseconds((int)(1000.0 / spawn_frequency_)), std::bind(&turtleSpawnerNode::spawn_new_turtle, this));
         timer_publisher_ = this-> create_wall_timer(std::chrono::seconds(1),std::bind(&turtleSpawnerNode::publish_alive_turtles,this));
@@ -51,9 +53,8 @@ public:
 
         client_kill_service_ = this->create_client<turtlesim::srv::Kill>("/kill");
 
-        // Create publisher. Publish in topic /alive_turtles
-        //  publish a Turtle() array.
-        publisher_alive_turtles_ = this->create_publisher<my_robot_interfaces::msg::Turtles>("/alive_turtles",10);
+
+        
 
         
 
@@ -72,8 +73,8 @@ public:
 
         auto client = this->create_client<turtlesim::srv::Spawn>("spawn");
 
-        float posX = random_number(0.0, 10.0);
-        float posY = random_number(0.0, 10.0);
+        float posX = random_number();
+        float posY = random_number();
 
         // wait for service
         while (!client->wait_for_service(std::chrono::seconds(1)))
@@ -125,7 +126,7 @@ public:
                 new_turtle.theta = 0.0;
                 
                 alive_turtles_vector_.push_back(new_turtle);
-                
+                publish_alive_turtles();
 
             }
             else
@@ -139,13 +140,22 @@ public:
         }
     }
 
-    float random_number(float min, float max)
+    float random_number()
     {
+        //srand(time(0));
+
         float random_number = 0.0;
 
-        random_number = (rand() / (double)RAND_MAX) * (max - min) + min;
+        random_number = ((float)rand() / (float)RAND_MAX) * (float)(10.0);
 
-        RCLCPP_INFO(this->get_logger(), "random_number: %f", random_number);
+        if (random_number <= 0.0)
+        {
+            random_number = 0.1;
+        }
+        else if (random_number >= 10.0)
+        {
+            random_number = 9.9;
+        }
 
         return random_number;
     }
@@ -187,7 +197,7 @@ public:
         try
         {
             auto response_ = future.get();
-            RCLCPP_INFO(this->get_logger(), "Turtle catched!");
+            RCLCPP_INFO(this->get_logger(), "Turtle catched: %s",request_name.c_str());
             for (int i = 0; i < (int) alive_turtles_vector_.size() ;i++) 
             {
                 if (alive_turtles_vector_.at(i).name == request_name)
@@ -225,6 +235,7 @@ private:
     std::vector<std::shared_ptr<std::thread>> spawn_turtle_threads_;
     std::vector<std::shared_ptr<std::thread>> kill_turtle_threads_;
     std::vector<my_robot_interfaces::msg::Turtle> alive_turtles_vector_;
+    std::vector<my_robot_interfaces::msg::Turtle> catched_turtles_vector_;
 
     rclcpp::Client<turtlesim::srv::Kill>::SharedPtr client_kill_service_;
     rclcpp::Service<my_robot_interfaces::srv::KillTurtle>::SharedPtr server_;

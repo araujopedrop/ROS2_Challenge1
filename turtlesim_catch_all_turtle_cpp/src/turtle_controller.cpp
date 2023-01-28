@@ -63,11 +63,6 @@ public:
 
         RCLCPP_INFO(this->get_logger(),"turtle_controller is up!");
 
-        // Create control algorithm
-        //  Define threshold
-        //  Define PID parameters
-        //  Subscribe to cmd_vel and set values using PID controller
-
     }
 
     void control_loop()
@@ -99,6 +94,10 @@ public:
 
                     RCLCPP_INFO(this->get_logger(),"Turtle to catch: %s", turtle_to_catch_.name.c_str());
                 }
+                else
+                {
+                    RCLCPP_WARN(this->get_logger(),"No turtle available!");
+                }
             }
             catch(const std::exception& e)
             {
@@ -108,8 +107,8 @@ public:
                 eTheta = 0.0;
                 difX = 0.0;
                 difY = 0.0;
-
-                RCLCPP_WARN(this->get_logger(),"No turtle available!");
+                turtle_to_catch_.name = "";
+                RCLCPP_ERROR(this->get_logger(),"No turtle available! - Error");
             }
             
         }
@@ -122,7 +121,8 @@ public:
         difY = set_point_Y_ - posY_;
 
         ePos = sqrt(pow(difX,2) + pow(difY,2));
-        eTheta = atan2(difY,difX);
+        steering_angle = (float) atan2(difY,difX);
+        eTheta =  steering_angle - theta_;
 
         if (eTheta > M_PI)
             eTheta -= 2*M_PI;
@@ -132,37 +132,72 @@ public:
                 eTheta += 2*M_PI;
         }
 
-        if (abs(eTheta) > abs(eTheta_threshold2))
+        if (abs(eTheta) > eTheta_threshold2)
+        {
             publish_velocity(0,P_ang*eTheta);
+
+        }
+
+        
         else
         {
-            if (abs(eTheta) > abs(eTheta_threshold))
+            
+            if (abs(ePos) > abs(ePos_threshold))
             {
-                if (abs(ePos) > abs(ePos_threshold))
-                    publish_velocity(P*ePos,P_ang*eTheta);
-                
+                publish_velocity(P*ePos,P_ang*eTheta);
+
             }
             else
             {
-                if (abs(ePos) > abs(ePos_threshold))
-                    publish_velocity(P*ePos,0.0);
-                else
-                {
-                    //Turtle catched!
-                    publish_velocity(0.0,0.0);
 
-                }
-            }
+                //Turtle catched!
+                publish_velocity(0.0,0.0);
+                pop_turtle_catched();
                 
-        }
+                RCLCPP_INFO(this->get_logger(),"Turtle catched: %s", turtle_to_catch_.name.c_str());
+                catching_a_turtle_ = false;
+                kill_turtle_threads_.push_back(std::make_shared<std::thread>(std::bind(&turtleControllerNode::kill_turtle,this,turtle_to_catch_.name)));
 
-        RCLCPP_WARN(this->get_logger(),"ePos: %f",ePos);
-        RCLCPP_WARN(this->get_logger(),"eTheta: %f",eTheta);
+            }
             
+
+        }
+        
     }
 
 
+    void kill_turtle(std::string turtle_name)
+    {
+        
+        while(!service_client_catch_turtle_->wait_for_service(std::chrono::seconds(1)))
+        {
+            RCLCPP_WARN(this->get_logger(),"Waiting for server");
+        }
 
+        auto request_kill_turtle_ = std::make_shared<my_robot_interfaces::srv::KillTurtle::Request>();
+
+        request_kill_turtle_->turtle = turtle_name;
+
+        auto future = service_client_catch_turtle_->async_send_request(request_kill_turtle_);
+
+        try
+        {
+            auto response = future.get();
+
+            if (response->success == true)
+                RCLCPP_INFO(this->get_logger(),"Turtle catched!. Turtle: %s",turtle_name.c_str());
+            else
+                RCLCPP_ERROR(this->get_logger(),"Turtle NOT catched!. Turtle: %s",turtle_name.c_str());
+
+        }
+        catch(const std::exception& e)
+        {
+            RCLCPP_ERROR(this->get_logger(),"Error in calling /catch_turtle service");
+        }
+        
+
+
+    }
 
     void callback_alive_turtles(const my_robot_interfaces::msg::Turtles::SharedPtr msg)
     {
@@ -174,11 +209,13 @@ public:
         my_robot_interfaces::msg::Turtle turtle;
         float min_distance = 9999.0;
         float current_distance = 9999.0;
+        int pos_turtle_founded = 0;
 
         if ((int)alive_turtles_vector_.size() > 0)
         // if there is a turtle to catch
         {
             turtle = alive_turtles_vector_.at(0);
+            
 
             if (catch_closest_turtle_first_ == true)
             {
@@ -191,16 +228,34 @@ public:
                     {
                         min_distance = current_distance;
                         turtle = alive_turtles_vector_.at(i);
+                        pos_turtle_founded = i;
                     }
                 }
 
-                return turtle;
+                
             }
             else
             {
                 // return the first turtle appeared and not catched
-                return alive_turtles_vector_.at(0);
+                turtle = alive_turtles_vector_.at(0);
+                pos_turtle_founded = 0;
+
             }
+
+            
+            if ((int)catched_turtles_vector_.size() > 0)
+            {
+                for (int i = 1; i < (int)catched_turtles_vector_.size(); i++)
+                    if (catched_turtles_vector_.at(i).name == turtle.name)
+                    {
+                        alive_turtles_vector_.erase(alive_turtles_vector_.begin()+ pos_turtle_founded);
+                        turtle.name = "";
+                        break;
+                    }
+            }
+            
+
+            return turtle;
 
         }
 
@@ -208,6 +263,26 @@ public:
         //if there isn't any turtle, I use try-catch block where this function is called 
         return turtle;
 
+    }
+
+    void pop_turtle_catched()
+    {
+        my_robot_interfaces::msg::Turtle turtle;
+
+        if ((int)alive_turtles_vector_.size() > 0)
+        // if there is a turtle to catch
+        {
+            for (int i = 1; i < (int)alive_turtles_vector_.size(); i++)
+            {
+                turtle = alive_turtles_vector_.at(i);
+                if (turtle.name == turtle_to_catch_.name)
+                {
+                    alive_turtles_vector_.erase(alive_turtles_vector_.begin()+ i);
+                    catched_turtles_vector_.push_back(turtle);
+                    break;
+                } 
+            }
+        }
     }
 
     void callback_get_pose(const turtlesim::msg::Pose::SharedPtr msg)
@@ -219,7 +294,7 @@ public:
 
     void publish_velocity(float linearVel, float angularVel)
     {
-        geometry_msgs::msg::Twist cmd_vel_;
+        geometry_msgs::msg::Twist cmd_vel_ = geometry_msgs::msg::Twist();
 
         cmd_vel_.linear.x = linearVel;
         cmd_vel_.angular.z = angularVel;
@@ -244,17 +319,18 @@ private:
 
     float difX = 0.0;
     float difY = 0.0;
+    float steering_angle = 0.0;
 
     //PID parameters
     float T = 0.01;
-    float P = 3;
+    float P = 2;
     float P_ang = 6;
     float I = 0.1;
     float D = 0.1;
 
     float ePos_threshold = 0.1;
     float eTheta_threshold = 0.1;
-    float eTheta_threshold2 = 10;
+    float eTheta_threshold2 = 0.785;
 
     my_robot_interfaces::msg::Turtle turtle_to_catch_ = my_robot_interfaces::msg::Turtle();
     rclcpp::Client<my_robot_interfaces::srv::KillTurtle>::SharedPtr service_client_catch_turtle_;
@@ -262,7 +338,9 @@ private:
     rclcpp::Subscription<turtlesim::msg::Pose>::SharedPtr subscriber_turtle_pose_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_cmd_vel_;
     std::vector<my_robot_interfaces::msg::Turtle> alive_turtles_vector_;
+    std::vector<my_robot_interfaces::msg::Turtle> catched_turtles_vector_;
     rclcpp::TimerBase::SharedPtr control_loop_timer_;
+    std::vector<std::shared_ptr<std::thread>> kill_turtle_threads_;
     
 };
 
